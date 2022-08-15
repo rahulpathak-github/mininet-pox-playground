@@ -3,6 +3,7 @@ import pox.openflow.libopenflow_01 as of
 from pox.lib.util import dpid_to_str, str_to_dpid
 from pox.lib.util import str_to_bool
 import time
+from pox.lib.addresses import EthAddr
 
 log = core.getLogger()
 
@@ -14,9 +15,43 @@ class LearningSwitch (object):
     self.connection = connection
     self.transparent = transparent
     self.macToPort = {}
+    self.firewall = {}
+    self.AddRule('00-00-00-00-00-01',EthAddr('00:00:00:00:00:01'))
+    self.AddRule('00-00-00-00-00-01',EthAddr('00:00:00:00:00:02'))
 
     connection.addListeners(self)
     self.hold_down_expired = _flood_delay == 0
+  
+  def AddRule(self, dpidstr, src=0,value=True):
+    self.firewall[(dpidstr,src)]=value
+    log.debug("Adding firewall rule in %s: %s", dpidstr, src)
+  
+  def DeleteRule(self, dpidstr, src=0):
+    try:
+      del self.firewall[(dpidstr,src)]
+      log.debug("Deleting firewall rule in %s: %s",
+                 dpidstr, src)
+    except KeyError:
+      log.error("Cannot find in %s: %s",
+                 dpidstr, src)
+  
+  def CheckRule(self, dpidstr,src=0):
+    try:
+      firewallEntry = self.firewall[(dpidstr,src)]
+      # print(firewallEntry)
+      if (firewallEntry == True):
+        log.debug("Rule (%s) found in %s: FORWARD",
+                  src, dpidstr)
+      else:
+        log.debug("Rule (%s) found in %s: DROP",
+                  src, dpidstr)
+      return firewallEntry
+    except KeyError as e:
+      # print(e)
+      log.debug("Rule (%s) NOT found in %s: DROP",
+                src, dpidstr)
+      return False
+
 
   def _handle_PacketIn (self, event):
 
@@ -56,9 +91,17 @@ class LearningSwitch (object):
         self.connection.send(msg)
 
     self.macToPort[packet.src] = event.port
+    dpidstr = dpid_to_str(event.connection.dpid)
+
+    print(self.CheckRule(dpidstr,packet.src))
+
+    if self.CheckRule(dpidstr, packet.src) == False:
+      drop()
+      return
 
     if not self.transparent:
       if packet.type == packet.LLDP_TYPE or packet.dst.isBridgeFiltered():
+        print("LOL")
         drop()
         return
 
